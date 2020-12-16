@@ -218,6 +218,8 @@ proc toExe*(filename: string): string =
 proc toDll*(filename: string): string =
   (when defined(windows): &"{filename}.lib" else: &"lib{filename}.so")
 
+const tmpdir* = ".nimakefiles"
+
 when isMainModule:
   var args = commandLineParams()
   var nimakefile = "build.nim"
@@ -226,17 +228,15 @@ when isMainModule:
     nimakefile = args[0]
     args.delete 0
 
-  let tmpDir = ".nimakefiles"
-
-  targetPriv tmpDir / "build".toExe:
+  targetPriv tmpdir / "build".toExe:
     main = nimakefile
     clean:
-      removeDir tmpDir
+      removeDir tmpdir
     receipt:
       echo &"Rebuilding {main}..."
-      mkdir tmpDir
-      exec &"nim c --verbosity:0 --hints:off --out:{tmpDir}/build --nimcache:{tmpDir} --opt:speed " & main
+      mkdir tmpdir
+      exec &"nim c --verbosity:0 --hints:off --out:{tmpdir}/build --nimcache:{tmpdir} --opt:speed " & main
 
   build()
 
-  quit(execCmd("$1/build ".format(tmpDir) & args.join(" ")))
+  quit(execCmd("$1/build ".format(tmpdir) & args.join(" ")))
