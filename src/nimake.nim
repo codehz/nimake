@@ -29,7 +29,7 @@ template exec*(cmd: string) =
     return Failed
 
 template mkdir*(dir) =
-  if not existsDir dir:
+  if not dirExists dir:
     try:
       if verb >= 1:
         echo "mkdir ".fgBlue, dir
@@ -40,18 +40,18 @@ template mkdir*(dir) =
 template rm*(path) =
   if verb >= 2:
     echo "removing ".fgLightRed, path
-  if existsDir path:
+  if dirExists path:
     if verb >= 1:
       echo "rm -r ".fgLightRed, path
     removeDir path
-  elif existsFile path:
+  elif fileExists path:
     if verb >= 1:
       echo "rm ".fgLightRed, path
     removeFile path
 
 template withDir*(dir, xbody) =
   let curDir = getCurrentDir()
-  if not existsDir(dir):
+  if not dirExists(dir):
     mkdir dir
   try:
     if verb >= 2:
@@ -79,7 +79,7 @@ template target*(file: string, getDef) =
   proc targetBlock() {.gensym.} =
     let target {.inject,used.} = getCurrentDir() / file
     var deps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
-    var main {.inject,used.}: string = nil
+    var main {.inject,used.}: string
     var cleans: proc() = proc() = rm file
 
     template dep(it) {.used.} =
@@ -97,7 +97,7 @@ template target*(file: string, getDef) =
           body
           Success
       )
-    targets.add file, getDef
+    targets[file] = getDef
   targetBlock()
 
 template onDemand(target: string, def: BuildDef, build) =
@@ -105,10 +105,10 @@ template onDemand(target: string, def: BuildDef, build) =
     if verb >= 2:
       echo "checking ".fgMagenta, target
     for f in def.depfiles:
-      if not existsFile f:
+      if not fileExists f:
         stderr.writeline "Recipe for '" & target & "' failed, file '" & f & "' is not exists"
         return Failed
-    if target.existsFile:
+    if target.fileExists:
       if verb >= 2:
         echo "exist ".fgYellow, target
       let targetTime = target.getLastModificationTime
@@ -126,7 +126,7 @@ template default*(target: string) =
 
 proc genLatest(build: BuildDef): Time =
   result = fromUnix(0)
-  if build.mainfile != nil:
+  if build.mainfile != "":
     result = build.mainfile.getLastModificationTime
   for f in build.depfiles:
     let temp = f.getLastModificationTime
@@ -137,7 +137,7 @@ iterator reorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string, def
   var tab = initTable[string, tuple[def: BuildDef, deps: HashSet[string]]] 256
   var tgts = toSeq subtargets.keys()
   for target, def in subtargets:
-    tab.add target, (def, def.depfiles.filterIt(it in tgts).toSet)
+    tab[target] = (def, def.depfiles.filterIt(it in tgts).toHashSet)
   while tab.len > 0:
     var queue = newSeqOfCap[string] 256
     for target, tp in tab:
@@ -157,7 +157,7 @@ proc buildOne*(tgt: string): BuildResult =
   if tgt in targets:
     let def = targets[tgt]
     var tmpTargets = def.depfiles.filterIt(it in targets).mapIt((it, targets[it])).newTable
-    tmpTargets.add(tgt, def)
+    tmpTargets[tgt] = def
     for target, def in reorder(tmpTargets):
       onDemand(target, def):
         if verb >= 1:
