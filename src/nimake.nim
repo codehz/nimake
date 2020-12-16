@@ -3,10 +3,12 @@ import tables, os, osproc, sequtils, times, strformat, strutils, segfaults, sets
 export `/`, walkDirRec, walkDir, walkFiles, walkDirs, walkPattern
 export parentDir, splitPath
 export `&`
-export sequtils, strutils, colorize
+export sequtils, strutils, colorize, osproc
 
 type
   BuildDef = object
+    isfake: bool
+    taskname: string
     mainfile: string
     depfiles: seq[string]
     action: proc(): BuildResult
@@ -14,6 +16,7 @@ type
   BuildResult* = enum
     Success, Failed
 
+const tmpdir* = ".nimakefiles"
 var targets = newTable[string, BuildDef] 16
 var verb = 0
 var defaultTarget = ""
@@ -77,44 +80,52 @@ template cp*(source, dest: string) =
     stderr.writeLine "Failed to copy file from $1 to $2.".format(source, dest)
     return Failed
 
-template targetPriv(file: string, getDef) =
+template target*(file: string, getDef: untyped) =
   block:
-    let target {.inject,used.} = getProjectDir() / file
+    let target {.inject,used.} = file
+    var name {.inject,used.}: string = ""
+    var fake {.inject,used.}: bool = false
     var deps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
     var main {.inject,used.}: string
-    var cleans: proc() = proc() = rm file
+    var cleans: proc() = proc() =
+      if not fake:
+        rm getProjectDir() / file
 
     template dep(it) {.used.} =
       deps.add(it)
     template depIt(it) {.used.} =
       deps.add(toSeq it)
     template clean(body) {.used.} =
-      cleans = proc() = body
+      cleans = proc() =
+        setCurrentDir getProjectDir()
+        body
     template receipt(body): BuildDef {.used.} =
       BuildDef(
+        isfake: fake,
+        taskname: (if name == "": file else: name),
         mainfile: main,
         depfiles: deps,
         cleans: cleans,
         action: proc(): BuildResult =
+          setCurrentDir getProjectDir()
           body
           return Success
       )
-    targets[file] = getDef
+    targets[target] = getDef
 
-template target*(file: string, getDef) =
-  targetPriv file:
-    setCurrentDir getProjectDir()
-    getDef
+proc checkfake(name: string): bool =
+  if targets.contains name:
+    return targets[name].isfake
 
 template onDemand(target: string, def: BuildDef, build) =
   block demand:
     if verb >= 2:
       echo "checking ".fgMagenta, target
     for f in def.depfiles:
-      if not fileExists f:
+      if (not fileExists f) and (not checkfake(f)):
         stderr.writeline "Recipe for '" & target & "' failed, file '" & f & "' is not exists"
         return Failed
-    if target.fileExists:
+    if not def.isfake and target.fileExists:
       if verb >= 2:
         echo "exist ".fgYellow, target
       let targetTime = target.getLastModificationTime
@@ -218,8 +229,6 @@ proc toExe*(filename: string): string =
 proc toDll*(filename: string): string =
   (when defined(windows): &"{filename}.lib" else: &"lib{filename}.so")
 
-const tmpdir* = ".nimakefiles"
-
 when isMainModule:
   var args = commandLineParams()
   var nimakefile = "build.nim"
@@ -228,15 +237,20 @@ when isMainModule:
     nimakefile = args[0]
     args.delete 0
 
-  targetPriv tmpdir / "build".toExe:
-    main = nimakefile
-    clean:
-      removeDir tmpdir
-    receipt:
-      echo &"Rebuilding {main}..."
-      mkdir tmpdir
-      exec &"nim c --verbosity:0 --hints:off --out:{tmpdir}/build --nimcache:{tmpdir} --opt:speed " & main
+  let striped = nimakefile[0..^5].multiReplace {"/": "@", "\\": "@"}
+  let exe = tmpdir / striped.toExe
 
+  targets[exe] = BuildDef(
+    taskname: "build",
+    mainfile: nimakefile,
+    depfiles: @[],
+    cleans: proc () = removeDir(tmpdir),
+    action: proc(): BuildResult =
+      echo &"Rebuilding {nimakefile}..."
+      mkdir tmpdir
+      exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on --opt:speed {nimakefile}"
+      return Success
+  )
   build()
 
-  quit(execCmd("$1/build ".format(tmpdir) & args.join(" ")))
+  quit(execCmd(exe & " " & args.join(" ")))

@@ -1,3 +1,4 @@
 nimcache
 pkgs
 build
+.nimakefiles
