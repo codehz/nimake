@@ -117,23 +117,28 @@ proc checkfake(name: string): bool =
   if targets.contains name:
     return targets[name].isfake
 
+proc getFriendlyName(target: string, def: BuildDef): string =
+  if def.taskname != "":
+    def.taskname.bold & "(" & target.fgYellow & ")"
+  else:
+    target.fgYellow
+
 template onDemand(target: string, def: BuildDef, build) =
   block demand:
-    let friendlyname = if def.taskname != "":
-      def.taskname & "('" & target & "')"
-    else:
-      "'" & target & "'"
+    let friendlyname = getFriendlyName(target, def)
     if verb >= 2:
       echo "checking ".fgMagenta, friendlyname
     for f in def.depfiles:
       if (not fileExists f) and (not checkfake(f)):
-        stderr.writeline "Recipe for " & friendlyname & " failed, file '" & f & "' is not exists"
+        stderr.writeline "error".fgRed & " Recipe for " & friendlyname & " failed, file '" & f & "' is not exists"
         return Failed
     if not def.isfake and target.fileExists:
       if verb >= 2:
-        echo "exist ".fgYellow, friendlyname
+        echo "exist ".fgGreen, friendlyname
       let targetTime = target.getLastModificationTime
       let depsTime = def.genLatest
+      if verb >= 3:
+        echo "time ".fgCyan, "target: ", ($targetTime).fgCyan, " depsTime: ", ($depsTime).fgCyan
       if targetTime >= depsTime:
         if verb >= 1:
           echo "skipped ".fgYellow, friendlyname
@@ -147,10 +152,19 @@ template default*(target: string) =
 
 proc genLatest(build: BuildDef): Time =
   result = fromUnix(0)
+  if build.isfake: return
   if build.mainfile != "":
     result = build.mainfile.getLastModificationTime
+    if verb >= 4:
+      echo "time ".fgBlue, "main ".bold, build.mainfile.fgYellow, " ", ($result).fgCyan
   for f in build.depfiles:
+    if checkfake f:
+      if verb >= 4:
+        echo "time ".fgBlue, f.fgYellow, " ", "skipped".fgRed
+      continue
     let temp = f.getLastModificationTime
+    if verb >= 4:
+      echo "time ".fgBlue, f.fgYellow, " ", ($temp).fgCyan
     if temp > result:
       result = temp
 
@@ -180,9 +194,10 @@ proc buildOne*(tgt: string): BuildResult =
     var tmpTargets = def.depfiles.filterIt(it in targets).mapIt((it, targets[it])).newTable
     tmpTargets[tgt] = def
     for target, def in reorder(tmpTargets):
+      let friendlyname = getFriendlyName(target, def)
       onDemand(target, def):
         if verb >= 1:
-          echo "building ".fgLightGreen.bold, target
+          echo "building ".fgLightGreen.bold, friendlyname
         if def.action() != Success:
           return Failed
     if verb >= 1:
@@ -193,9 +208,10 @@ proc buildOne*(tgt: string): BuildResult =
 
 proc buildAll*(): BuildResult =
   for target, def in reorder(targets):
+    let friendlyname = getFriendlyName(target, def)
     onDemand(target, def):
       if verb >= 1:
-        echo "building ".fgLightGreen.bold, target
+        echo "building ".fgLightGreen.bold, friendlyname
       if def.action() != Success:
         return Failed
   if verb >= 1:
@@ -250,7 +266,7 @@ when isMainModule:
     depfiles: @[],
     cleans: proc () = removeDir(tmpdir),
     action: proc(): BuildResult =
-      echo &"Rebuilding {nimakefile}..."
+      echo "Rebuilding " & nimakefile.fgYellow & "..."
       mkdir tmpdir
       exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on --opt:speed {nimakefile}"
       return Success
