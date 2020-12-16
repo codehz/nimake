@@ -8,6 +8,7 @@ export sequtils, strutils, colorize, osproc
 type
   BuildDef = object
     isfake: bool
+    islazy: bool
     taskname: string
     mainfile: string
     depfiles: seq[string]
@@ -86,6 +87,7 @@ template target*(file: string, getDef: untyped) =
     let target {.inject,used.} = file
     var name {.inject,used.}: string = ""
     var fake {.inject,used.}: bool = false
+    var lazy {.inject,used.}: bool = false
     var deps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
     var cleandeps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
     var main {.inject,used.}: string
@@ -106,6 +108,7 @@ template target*(file: string, getDef: untyped) =
     template receipt(body): BuildDef {.used.} =
       BuildDef(
         isfake: fake,
+        islazy: lazy,
         taskname: name,
         mainfile: main,
         depfiles: deps,
@@ -140,6 +143,10 @@ template onDemand(target: string, def: BuildDef, build) =
     if not def.isfake and target.fileExists:
       if verb >= 2:
         echo "exist ".fgGreen, friendlyname
+      if def.islazy:
+        if verb >= 2:
+          echo "skipped modification time check due to lazy = true".fgMagenta
+        break demand
       let targetTime = target.getLastModificationTime
       let depsTime = def.genLatest
       if verb >= 3:
@@ -330,7 +337,7 @@ when isMainModule:
     action: proc(): BuildResult =
       echo "Rebuilding " & nimakefile.fgYellow & "..."
       mkdir tmpdir
-      exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on --opt:speed {nimakefile}"
+      exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on {nimakefile}"
       return Success
   )
   build()
