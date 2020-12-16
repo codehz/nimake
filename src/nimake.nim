@@ -156,7 +156,7 @@ template default*(target: string) =
   defaultTarget = target
 
 proc genLatest(build: BuildDef): Time =
-  result = fromUnix(0)
+  result = getAppFilename().getLastModificationTime
   if build.isfake: return
   if build.mainfile != "":
     result = build.mainfile.getLastModificationTime
