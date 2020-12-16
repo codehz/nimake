@@ -102,7 +102,7 @@ template target*(file: string, getDef: untyped) =
     template receipt(body): BuildDef {.used.} =
       BuildDef(
         isfake: fake,
-        taskname: (if name == "": file else: name),
+        taskname: name,
         mainfile: main,
         depfiles: deps,
         cleans: cleans,
