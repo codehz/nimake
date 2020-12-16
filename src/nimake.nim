@@ -214,6 +214,14 @@ iterator cleanReorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string
         tp.deps.excl item
 
 proc grabDependencies(tab: var TableRef[string, BuildDef], base: BuildDef) =
+  if base.mainfile in targets and not (base.mainfile in tab):
+    let target = base.mainfile
+    let def = targets[target]
+    if verb >= 2:
+      let friendlyname = getFriendlyName(target, def)
+      echo "found ".fgGreen, "main ".bold, friendlyname
+    tab[target] = def
+    grabDependencies(tab, def)
   for target in base.depfiles:
     if target in targets and not (target in tab):
       let def = targets[target]
