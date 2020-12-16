@@ -19,13 +19,13 @@ type
     Success, Failed
 
 const tmpdir* = ".nimakefiles"
-var targets = newTable[string, BuildDef] 16
+var alltargets = newTable[string, BuildDef] 16
 var verb = 0
 var defaultTarget = ""
 
 proc getProjectDir*(): string = getAppDir() / ".."
 
-template walkTargets*(x) = toSeq(targets.keys).filterIt x
+template walkTargets*(x) = toSeq(alltargets.keys).filterIt x
 
 template exec*(cmd: string) =
   if verb >= 1:
@@ -119,11 +119,11 @@ template target*(file: string, getDef: untyped) =
           body
           return Success
       )
-    targets[target] = getDef
+    alltargets[target] = getDef
 
 proc checkfake(name: string): bool =
-  if targets.contains name:
-    return targets[name].isfake
+  if alltargets.contains name:
+    return alltargets[name].isfake
 
 proc getFriendlyName(target: string, def: BuildDef): string =
   if def.taskname != "":
@@ -220,44 +220,48 @@ iterator cleanReorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string
       for _,tp in tab.mpairs:
         tp.deps.excl item
 
-proc grabDependencies(tab: var TableRef[string, BuildDef], base: BuildDef) =
-  if base.mainfile in targets and not (base.mainfile in tab):
+template propagate*(body: untyped): untyped =
+  if body == Failed:
+    return Failed
+
+proc grabDependencies(tab: var TableRef[string, BuildDef], name: string, forClean: static bool): BuildResult =
+  if not (name in alltargets):
+    stderr.writeLine "No receipt for " & name.fgRed.bold
+    return Failed
+  let base = alltargets[name]
+  tab[name] = base
+  if base.mainfile in alltargets and not (base.mainfile in tab):
     let target = base.mainfile
-    let def = targets[target]
+    let def = alltargets[target]
     if verb >= 2:
       let friendlyname = getFriendlyName(target, def)
       echo "found ".fgGreen, "main ".bold, friendlyname
-    tab[target] = def
-    grabDependencies(tab, def)
-  for target in base.depfiles:
-    if target in targets and not (target in tab):
-      let def = targets[target]
+    propagate grabDependencies(tab, target, forClean)
+  for target in (when forClean: base.cleandeps else: base.depfiles):
+    if target in alltargets and not (target in tab):
+      let def = alltargets[target]
       if verb >= 2:
         let friendlyname = getFriendlyName(target, def)
         echo "found ".fgGreen, friendlyname
-      tab[target] = def
-      grabDependencies(tab, def)
+      propagate grabDependencies(tab, target, forClean)
 
-proc buildOne*(tgt: string): BuildResult =
-  if tgt in targets:
-    let def = targets[tgt]
-    var tmpTargets = newTable[string, BuildDef] 16
-    grabDependencies(tmpTargets, def)
-    for target, def in reorder(tmpTargets):
-      let friendlyname = getFriendlyName(target, def)
-      onDemand(target, def):
-        if verb >= 1:
-          echo "building ".fgLightGreen.bold, friendlyname
-        if def.action() != Success:
-          return Failed
-    if verb >= 1:
-      echo "all done".fgLightGreen.bold
-    return Success
-  stderr.writeLine "No receipt for " & tgt
-  Failed
+proc buildList(selected: openarray[string]): BuildResult =
+  var tmpTargets = newTable[string, BuildDef] 16
+  for tgt in selected:
+    propagate grabDependencies(tmpTargets, tgt, false)
+  for target, def in reorder(tmpTargets):
+    let friendlyname = getFriendlyName(target, def)
+    onDemand(target, def):
+      if verb >= 1:
+        echo "building ".fgLightGreen.bold, friendlyname
+      if def.action() != Success:
+        return Failed
+  if verb >= 1:
+    echo "all done".fgLightGreen.bold
+  return Success
 
-proc buildAll*(): BuildResult =
-  for target, def in reorder(targets):
+proc buildAll(): BuildResult =
+  for target, def in reorder(alltargets):
     let friendlyname = getFriendlyName(target, def)
     onDemand(target, def):
       if verb >= 1:
@@ -268,31 +272,48 @@ proc buildAll*(): BuildResult =
     echo "all done".fgLightGreen.bold
   Success
 
-proc clean*(verbosity: int = 0) =
-  verb = verbosity
-  for target, def in cleanReorder(targets):
-    if def.cleans != nil:
-      let friendlyname = getFriendlyName(target, def)
-      if verb >= 1:
-        echo "clean ".fgRed.bold, friendlyname
-      def.cleans()
+proc cleanList(selected: seq[string]): BuildResult =
+  var tmpTargets = newTable[string, BuildDef] 16
+  for tgt in selected:
+    propagate grabDependencies(tmpTargets, tgt, true)
+  for target, def in cleanReorder(tmpTargets):
+    let friendlyname = getFriendlyName(target, def)
+    if verb >= 1:
+      echo "clean ".fgRed.bold, friendlyname
+    def.cleans()
+  return Success
+
+proc cleanAll(): BuildResult =
+  for target, def in cleanReorder(alltargets):
+    let friendlyname = getFriendlyName(target, def)
+    if verb >= 1:
+      echo "clean ".fgRed.bold, friendlyname
+    def.cleans()
+  return Success
 
 proc fail2fatal(res: BuildResult) =
   if res == Failed:
     quit 1
 
-proc build(target: string = "", verbosity: int = 0) =
+proc build(verbosity: int = 0, targets: seq[string]) =
   verb = verbosity
-  if target == "":
+  fail2fatal if targets.len == 0:
     if defaultTarget == "":
-      fail2fatal buildAll()
+      buildAll()
     else:
-      fail2fatal buildOne(defaultTarget)
+      buildList([defaultTarget])
   else:
-    fail2fatal buildOne(target)
+    buildList(targets)
+
+proc clean(verbosity: int = 0, targets: seq[string]) =
+  verb = verbosity
+  fail2fatal if targets.len == 0:
+    cleanAll()
+  else:
+    cleanList(targets)
 
 proc dump() =
-  for key, tgt in reorder(targets):
+  for key, tgt in reorder(alltargets):
     echo key.fgYellow
     if tgt.taskname != "":
       echo "  name: ", tgt.taskname
@@ -301,7 +322,7 @@ proc dump() =
     if tgt.depfiles.len > 0:
       echo "  deps:"
       for dep in tgt.depfiles:
-        if dep in targets:
+        if dep in alltargets:
           echo "    - ", dep.fgYellow
         elif fileExists dep:
           echo "    - ", dep.fgBlue
@@ -329,7 +350,7 @@ when isMainModule:
   let striped = nimakefile[0..^5].multiReplace {"/": "@", "\\": "@"}
   let exe = tmpdir / striped.toExe
 
-  targets[exe] = BuildDef(
+  alltargets[exe] = BuildDef(
     taskname: "build",
     mainfile: nimakefile,
     depfiles: @[],
@@ -340,6 +361,6 @@ when isMainModule:
       exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on {nimakefile}"
       return Success
   )
-  build()
+  build(0, @[])
 
   quit(execCmd(exe & " " & args.join(" ")))
