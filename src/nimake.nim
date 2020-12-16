@@ -247,7 +247,7 @@ proc toExe*(filename: string): string =
   (when defined(windows): &"{filename}.exe" else: filename)
 
 proc toDll*(filename: string): string =
-  (when defined(windows): &"{filename}.lib" else: &"lib{filename}.so")
+  (when defined(windows): &"{filename}.dll" else: &"lib{filename}.so")
 
 when isMainModule:
   var args = commandLineParams()
