@@ -119,23 +119,27 @@ proc checkfake(name: string): bool =
 
 template onDemand(target: string, def: BuildDef, build) =
   block demand:
+    let friendlyname = if def.taskname != "":
+      def.taskname & "('" & target & "')"
+    else:
+      "'" & target & "'"
     if verb >= 2:
-      echo "checking ".fgMagenta, target
+      echo "checking ".fgMagenta, friendlyname
     for f in def.depfiles:
       if (not fileExists f) and (not checkfake(f)):
-        stderr.writeline "Recipe for '" & target & "' failed, file '" & f & "' is not exists"
+        stderr.writeline "Recipe for " & friendlyname & " failed, file '" & f & "' is not exists"
         return Failed
     if not def.isfake and target.fileExists:
       if verb >= 2:
-        echo "exist ".fgYellow, target
+        echo "exist ".fgYellow, friendlyname
       let targetTime = target.getLastModificationTime
       let depsTime = def.genLatest
       if targetTime >= depsTime:
         if verb >= 1:
-          echo "skipped ".fgYellow, target
+          echo "skipped ".fgYellow, friendlyname
         break demand
       if verb >= 2:
-        echo "outdated ".fgRed, target
+        echo "outdated ".fgRed, friendlyname
     build
 
 template default*(target: string) =
