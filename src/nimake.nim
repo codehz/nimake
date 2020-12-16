@@ -18,6 +18,8 @@ var targets = newTable[string, BuildDef] 16
 var verb = 0
 var defaultTarget = ""
 
+proc getProjectDir*(): string = getAppDir() / ".."
+
 template walkTargets*(x) = toSeq(targets.keys).filterIt x
 
 template exec*(cmd: string) =
@@ -75,9 +77,9 @@ template cp*(source, dest: string) =
     stderr.writeLine "Failed to copy file from $1 to $2.".format(source, dest)
     return Failed
 
-template target*(file: string, getDef) =
-  proc targetBlock() {.gensym.} =
-    let target {.inject,used.} = getCurrentDir() / file
+template targetPriv(file: string, getDef) =
+  block:
+    let target {.inject,used.} = getProjectDir() / file
     var deps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
     var main {.inject,used.}: string
     var cleans: proc() = proc() = rm file
@@ -95,10 +97,14 @@ template target*(file: string, getDef) =
         cleans: cleans,
         action: proc(): BuildResult =
           body
-          Success
+          return Success
       )
     targets[file] = getDef
-  targetBlock()
+
+template target*(file: string, getDef) =
+  targetPriv file:
+    setCurrentDir getProjectDir()
+    getDef
 
 template onDemand(target: string, def: BuildDef, build) =
   block demand:
@@ -206,6 +212,12 @@ template handleCLI*() =
   import cligen
   dispatchMulti([build], [clean])
 
+proc toExe*(filename: string): string =
+  (when defined(windows): &"{filename}.exe" else: filename)
+
+proc toDll*(filename: string): string =
+  (when defined(windows): &"{filename}.lib" else: &"lib{filename}.so")
+
 when isMainModule:
   var args = commandLineParams()
   var nimakefile = "build.nim"
@@ -216,14 +228,14 @@ when isMainModule:
 
   let tmpDir = ".nimakefiles"
 
-  target tmpDir / "build":
-    dep: [nimakefile]
+  targetPriv tmpDir / "build".toExe:
+    main = nimakefile
     clean:
       removeDir tmpDir
     receipt:
-      echo &"Rebuilding {nimakefile}..."
+      echo &"Rebuilding {main}..."
       mkdir tmpDir
-      exec &"nim c --verbosity:0 --hints:off --out:{tmpDir}/build --nimcache:{tmpDir} " & nimakefile
+      exec &"nim c --verbosity:0 --hints:off --out:{tmpDir}/build --nimcache:{tmpDir} --opt:speed " & main
 
   build()
 
