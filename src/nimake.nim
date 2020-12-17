@@ -3,7 +3,7 @@ import tables, os, osproc, sequtils, times, strformat, strutils, segfaults, sets
 export `/`, walkDirRec, walkDir, walkFiles, walkDirs, walkPattern
 export parentDir, splitPath
 export `&`
-export sequtils, strutils, colorize, osproc
+export sequtils, strutils, colorize, osproc, sets
 
 type
   BuildDef = object
@@ -11,8 +11,8 @@ type
     islazy: bool
     taskname: string
     mainfile: string
-    depfiles: seq[string]
-    cleandeps: seq[string]
+    depfiles: OrderedSet[string]
+    cleandeps: OrderedSet[string]
     action: proc(): BuildResult
     cleans: proc()
   BuildResult* = enum
@@ -90,19 +90,21 @@ template target*(file: string, getDef: untyped) =
     var name {.inject,used.}: string = ""
     var fake {.inject,used.}: bool = false
     var lazy {.inject,used.}: bool = false
-    var deps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
-    var cleandeps {.inject,used.}: seq[string] = newSeqOfCap[string] 256
+    var deps {.inject,used.}: OrderedSet[string] = initOrderedSet[string] 256
+    var cleandeps {.inject,used.}: OrderedSet[string] = initOrderedSet[string] 256
     var main {.inject,used.}: string
     var cleans: proc() = nil
 
     template dep(it) {.used.} =
-      deps.add(it)
+      deps.incl(it)
     template depIt(it) {.used.} =
-      deps.add(toSeq it)
+      for i in it:
+        deps.incl(i)
     template cleanDep(it) {.used.} =
-      cleandeps.add(it)
+      cleandeps.incl(it)
     template cleanDepIt(it) {.used.} =
-      cleandeps.add(toSeq it)
+      for i in it:
+        cleandeps.incl(i)
     template clean(body) {.used.} =
       cleans = proc() =
         setCurrentDir getProjectDir()
@@ -188,7 +190,7 @@ iterator reorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string, def
   var tab = initTable[string, tuple[def: BuildDef, deps: HashSet[string]]] 256
   var tgts = toSeq subtargets.keys()
   for target, def in subtargets:
-    tab[target] = (def, def.depfiles.filterIt(it in tgts).toHashSet)
+    tab[target] = (def, def.depfiles.toSeq.filterIt(it in tgts).toHashSet)
   while tab.len > 0:
     var queue = newSeqOfCap[string] 256
     for target, tp in tab:
@@ -208,7 +210,7 @@ iterator cleanReorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string
   var tab = initTable[string, tuple[def: BuildDef, deps: HashSet[string]]] 256
   var tgts = toSeq subtargets.keys()
   for target, def in subtargets:
-    tab[target] = (def, def.cleandeps.filterIt(it in tgts).toHashSet)
+    tab[target] = (def, def.cleandeps.toSeq.filterIt(it in tgts).toHashSet)
   while tab.len > 0:
     var queue = newSeqOfCap[string] 256
     for target, tp in tab:
@@ -357,7 +359,8 @@ when isMainModule:
   alltargets[exe] = BuildDef(
     taskname: "build",
     mainfile: nimakefile,
-    depfiles: @[],
+    depfiles: initOrderedSet[string](),
+    cleandeps: initOrderedSet[string](),
     cleans: proc () = removeDir(tmpdir),
     action: proc(): BuildResult =
       echo "Rebuilding " & nimakefile.fgYellow & "..."
