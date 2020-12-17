@@ -286,7 +286,8 @@ proc cleanList(selected: seq[string]): BuildResult =
     let friendlyname = getFriendlyName(target, def)
     if verb >= 1:
       echo "clean ".fgRed.bold, friendlyname
-    def.cleans()
+    if def.cleans != nil:
+      def.cleans()
   return Success
 
 proc cleanAll(): BuildResult =
@@ -294,7 +295,8 @@ proc cleanAll(): BuildResult =
     let friendlyname = getFriendlyName(target, def)
     if verb >= 1:
       echo "clean ".fgRed.bold, friendlyname
-    def.cleans()
+    if def.cleans != nil:
+      def.cleans()
   return Success
 
 proc fail2fatal(res: BuildResult) =
