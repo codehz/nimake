@@ -118,6 +118,8 @@ template target*(file: string, getDef: untyped) =
         cleans: if cleans != nil or fake: cleans else: (proc() = rm getProjectDir() / file),
         action: proc(): BuildResult =
           setCurrentDir getProjectDir()
+          template absolute(path: untyped): untyped =
+            let path {.inject.} = path.absolutePath()
           body
           return Success
       )
