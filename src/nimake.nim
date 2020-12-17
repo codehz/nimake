@@ -64,6 +64,8 @@ template withDir*(dir, xbody) =
     if verb >= 2:
       echo "entering ".fgBlue, dir
     setCurrentDir dir
+    template relative(target: untyped): untyped {.inject,used.} =
+      let target {.inject.} = target.relativePath dir
     xbody
   except:
     stderr.writeLine "Failed to change working directory to $1.".format(dir)
