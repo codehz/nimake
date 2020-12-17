@@ -11,6 +11,6 @@ installExt    = @["nim"]
 
 # Dependencies
 
-requires "nim >= 0.18.0"
-requires "cligen >= 0.9.0"
+requires "nim >= 1.4.0"
+requires "cligen >= 1.3.0"
 requires "colorize >= 0.2.0"
