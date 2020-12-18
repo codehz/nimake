@@ -32,7 +32,7 @@ template exec*(cmd: string) =
     echo "exec ".fgGreen, cmd
   let code = execShellCmd(cmd)
   if code != 0:
-    stderr.writeLine "Executing '$1' failed with code $2.".format(cmd, code)
+    stderr.writeLine "Executing '$1' failed with code $2.".format(cmd.bold, ($code).fgRed.bold)
     return Failed
 
 template mkdir*(dir) =
@@ -42,7 +42,7 @@ template mkdir*(dir) =
         echo "mkdir ".fgBlue, dir
       createDir dir
     except:
-      stderr.writeLine "Cannot create directory: $1.".format(dir)
+      stderr.writeLine "Cannot create directory: $1.".format(dir.bold)
 
 template rm*(path) =
   if verb >= 2:
@@ -62,17 +62,17 @@ template withDir*(dir, xbody) =
     mkdir dir
   try:
     if verb >= 2:
-      echo "entering ".fgBlue, dir
+      echo "entering ".fgBlue, dir.bold
     setCurrentDir dir
     template relative(target: untyped): untyped {.inject,used.} =
       let target {.inject.} = target.relativePath dir
     xbody
   except:
-    stderr.writeLine "Failed to change working directory to $1.".format(dir)
+    stderr.writeLine "Failed to change working directory to $1.".format(dir.fgRed.bold)
     return Failed
   finally:
     if verb >= 2:
-      echo "leaving ".fgBlue, dir
+      echo "leaving ".fgBlue, dir.bold
     setCurrentDir curDir
 
 template cp*(source, dest: string) =
@@ -81,7 +81,7 @@ template cp*(source, dest: string) =
       echo "copy ".fgGreen, source, " ", dest
     copyFile source, dest
   except:
-    stderr.writeLine "Failed to copy file from $1 to $2.".format(source, dest)
+    stderr.writeLine "Failed to copy file from $1 to $2.".format(source.fgYellow.bold, dest.fgRed.bold)
     return Failed
 
 template target*(file: string, getDef: untyped) =
@@ -150,7 +150,7 @@ template onDemand(target: string, def: BuildDef, build) =
       if verb >= 2:
         echo "exist ".fgGreen, friendlyname
       if def.islazy:
-        if verb >= 2:
+        if verb >= 3:
           echo "skipped modification time check due to lazy = true".fgMagenta
         break demand
       let targetTime = target.getLastModificationTime
@@ -323,22 +323,22 @@ proc clean(verbosity: int = 0, targets: seq[string]) =
   else:
     cleanList(targets)
 
+proc colorizeTarget(name: string): string =
+  if name in alltargets: name.fgYellow
+  elif fileExists name: name.fgBlue
+  else: name.fgRed
+
 proc dump() =
   for key, tgt in reorder(alltargets):
     echo key.fgYellow
     if tgt.taskname != "":
-      echo "  name: ", tgt.taskname
+      echo "  name: ", tgt.taskname.fgYellow.bold
     if tgt.mainfile != "":
-      echo "  main: ", tgt.mainfile
+      echo "  main: ", tgt.mainfile.colorizeTarget
     if tgt.depfiles.len > 0:
       echo "  deps:"
       for dep in tgt.depfiles:
-        if dep in alltargets:
-          echo "    - ", dep.fgYellow
-        elif fileExists dep:
-          echo "    - ", dep.fgBlue
-        else:
-          echo "    - ", dep.fgRed
+        echo "    - ", dep.colorizeTarget
 
 template handleCLI*() =
   import cligen
@@ -368,7 +368,7 @@ when isMainModule:
     cleandeps: initOrderedSet[string](),
     cleans: proc () = removeDir(tmpdir),
     action: proc(): BuildResult =
-      echo "Rebuilding " & nimakefile.fgYellow & "..."
+      echo "Rebuilding " & nimakefile.fgYellow.bold & "..."
       mkdir tmpdir
       exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on {nimakefile}"
       return Success
