@@ -20,6 +20,7 @@ type
 
 const tmpdir* = ".nimakefiles"
 var alltargets = newTable[string, BuildDef] 16
+var alttargets = newTable[string, string] 16
 var verb = 0
 var defaultTarget = ""
 
@@ -92,9 +93,15 @@ template target*(file: string, getDef: untyped) =
     var lazy {.inject,used.}: bool = false
     var deps {.inject,used.}: OrderedSet[string] = initOrderedSet[string] 256
     var cleandeps {.inject,used.}: OrderedSet[string] = initOrderedSet[string] 256
+    var altoutputs {.inject,used.}: OrderedSet[string] = initOrderedSet[string] 256
     var main {.inject,used.}: string
     var cleans: proc() = nil
 
+    template output(it) {.used.} =
+      altoutputs.incl(it)
+    template outputIt(it) {.used.} =
+      for i in it:
+        altoutputs.incl(i)
     template dep(it) {.used.} =
       deps.incl(it)
     template depIt(it) {.used.} =
@@ -110,6 +117,8 @@ template target*(file: string, getDef: untyped) =
         setCurrentDir getProjectDir()
         body
     template receipt(body): BuildDef {.used.} =
+      for alt in altoutputs:
+        alttargets[alt] = file
       BuildDef(
         isfake: fake,
         islazy: lazy,
@@ -117,7 +126,12 @@ template target*(file: string, getDef: untyped) =
         mainfile: main,
         depfiles: deps,
         cleandeps: cleandeps,
-        cleans: if cleans != nil or fake: cleans else: (proc() = rm getProjectDir() / file),
+        cleans: if cleans != nil or fake: cleans else: (proc() =
+          setCurrentDir getProjectDir()
+          rm file
+          for alt in altoutputs:
+            rm alt
+        ),
         action: proc(): BuildResult =
           setCurrentDir getProjectDir()
           template absolute(path: untyped): untyped =
@@ -325,14 +339,15 @@ proc clean(verbosity: int = 0, targets: seq[string]) =
 
 proc colorizeTarget(name: string): string =
   if name in alltargets: name.fgYellow
+  elif name in alttargets: "$1 <- $2".format(name.fgCyan.bold, alttargets[name].fgYellow)
   elif fileExists name: name.fgBlue
   else: name.fgRed
 
 proc dump() =
   for key, tgt in reorder(alltargets):
-    echo key.fgYellow
+    echo "[", key.fgGreen.bold, "]"
     if tgt.taskname != "":
-      echo "  name: ", tgt.taskname.fgYellow.bold
+      echo "  name: ", tgt.taskname.fgMagenta.bold
     if tgt.mainfile != "":
       echo "  main: ", tgt.mainfile.colorizeTarget
     if tgt.depfiles.len > 0:
