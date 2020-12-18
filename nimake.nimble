@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.4.4"
+version       = "0.4.5"
 author        = "CodeHz"
 description   = "A simple build system"
 license       = "MIT"
