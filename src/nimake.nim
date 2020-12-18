@@ -200,13 +200,20 @@ proc genLatest(build: BuildDef): Time =
     if temp > result:
       result = temp
 
+proc addDependency(res: var HashSet[string], name: string) =
+  if name in alltargets:
+    res.incl name
+  elif name in alttargets:
+    res.incl alttargets[name]
+
 iterator reorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string, def: BuildDef] =
   var tab = initTable[string, tuple[def: BuildDef, deps: HashSet[string]]] 256
-  var tgts = toSeq subtargets.keys()
   for target, def in subtargets:
-    var tmp = def.depfiles.toSeq.filterIt(it in tgts).toHashSet
-    if def.mainfile != "" and def.mainfile in tgts:
-      tmp.incl def.mainfile
+    var tmp = initHashSet[string]()
+    for name in def.depfiles:
+      addDependency(tmp, name)
+    if def.mainfile != "":
+      addDependency(tmp, def.mainfile)
     tab[target] = (def, tmp)
   while tab.len > 0:
     var queue = newSeqOfCap[string] 256
@@ -247,6 +254,8 @@ template propagate*(body: untyped): untyped =
   if body == Failed:
     return Failed
 
+proc findDependencies(tab: var TableRef[string, BuildDef], target: string, ismain, forClean: static bool, rec: bool = false): BuildResult
+
 proc grabDependencies(tab: var TableRef[string, BuildDef], name: string, forClean: static bool): BuildResult =
   if not (name in alltargets):
     stderr.writeLine "No receipt for " & name.fgRed.bold
@@ -254,19 +263,25 @@ proc grabDependencies(tab: var TableRef[string, BuildDef], name: string, forClea
   let base = alltargets[name]
   tab[name] = base
   if base.mainfile in alltargets and not (base.mainfile in tab):
-    let target = base.mainfile
+    propagate findDependencies(tab, base.mainfile, true, forClean)
+  for target in (when forClean: base.cleandeps else: base.depfiles):
+    propagate findDependencies(tab, target, false, forClean)
+
+proc findDependencies(tab: var TableRef[string, BuildDef], target: string, ismain, forClean: static bool, rec: bool = false): BuildResult =
+  if target in tab: return Success
+  elif target in alltargets:
     let def = alltargets[target]
     if verb >= 2:
       let friendlyname = getFriendlyName(target, def)
-      echo "found ".fgGreen, "main ".bold, friendlyname
-    propagate grabDependencies(tab, target, forClean)
-  for target in (when forClean: base.cleandeps else: base.depfiles):
-    if target in alltargets and not (target in tab):
-      let def = alltargets[target]
-      if verb >= 2:
-        let friendlyname = getFriendlyName(target, def)
+      if ismain:
+        echo "found ".fgGreen, "main ".bold, friendlyname
+      else:
         echo "found ".fgGreen, friendlyname
-      propagate grabDependencies(tab, target, forClean)
+    return grabDependencies(tab, target, forClean)
+  elif not rec and target in alttargets:
+    return findDependencies(tab, alttargets[target], ismain, forClean, true)
+  else:
+    return Success
 
 proc buildList(selected: openarray[string]): BuildResult =
   var tmpTargets = newTable[string, BuildDef] 16
