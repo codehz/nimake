@@ -190,7 +190,10 @@ iterator reorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string, def
   var tab = initTable[string, tuple[def: BuildDef, deps: HashSet[string]]] 256
   var tgts = toSeq subtargets.keys()
   for target, def in subtargets:
-    tab[target] = (def, def.depfiles.toSeq.filterIt(it in tgts).toHashSet)
+    var tmp = def.depfiles.toSeq.filterIt(it in tgts).toHashSet
+    if def.mainfile != "" and def.mainfile in tgts:
+      tmp.incl def.mainfile
+    tab[target] = (def, tmp)
   while tab.len > 0:
     var queue = newSeqOfCap[string] 256
     for target, tp in tab:
