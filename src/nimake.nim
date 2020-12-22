@@ -1,12 +1,13 @@
-import tables, os, osproc, sequtils, strformat, strutils, segfaults, sets, colorize
+import tables, os, osproc, sequtils, strutils, segfaults, sets, colorize
 
 export `/`, walkDirRec, walkDir, walkFiles, walkDirs, walkPattern
 export parentDir, splitPath
-export `&`
 export sequtils, strutils, colorize, osproc, sets
 
-import nimakepkg/[ops, global, private]
-export ops
+import nimakepkg/[ops, global, cli, defines, colorset]
+export ops, cli, define, colorfmt, identity, `|`, checkVerbose
+
+proc colorMode*(): bool = usecolor
 
 template walkTargets*(x) = toSeq(alltargets.keys).filterIt x
 
@@ -69,11 +70,9 @@ template target*(file: string, getDef: untyped) =
 template default*(target: string) =
   defaultTarget = target
 
-template handleCLI*() =
-  import cligen
-  dispatchMulti([build], [clean], [dump])
-
 when isMainModule:
+  import nimakepkg/private
+
   var args = commandLineParams()
   var nimakefile = "build.nim"
 
@@ -91,11 +90,14 @@ when isMainModule:
     cleandeps: initOrderedSet[string](),
     cleans: proc () = removeDir(tmpdir),
     action: proc(): BuildResult =
-      echo "Rebuilding " & nimakefile.fgYellow.bold & "..."
+      if not fileExists nimakefile:
+        echo nimakefile & " not found!"
+        printHelp()
+      echo "Rebuilding " & nimakefile & "..."
       mkdir tmpdir
-      exec &"nim c --verbosity:0 --hints:off --out:{exe} --nimcache:{tmpdir} --skipProjCfg:on --skipParentCfg:on {nimakefile}"
+      exec "nim c --verbosity:0 --hints:off --out:$1 --nimcache:$2 --skipProjCfg:on --skipParentCfg:on $3" % [exe, tmpdir, nimakefile]
       return Success
   )
-  build(0, @[])
+  build(@[])
 
   quit(execCmd(exe & " " & args.join(" ")))

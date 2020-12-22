@@ -1,65 +1,44 @@
-import tables, os, strutils, colorize, sets, times, sequtils
-import global, ops
+import tables, os, strutils, sets, times, sequtils
+import global, ops, colorset
 
-proc checkfake*(name: string): bool =
+proc checkfake(name: string): bool =
   if alltargets.contains name:
     return alltargets[name].isfake
 
-proc getFriendlyName*(target: string, def: BuildDef): string =
-  if def.taskname != "":
-    def.taskname.bold & "(" & target.fgYellow & ")"
-  else:
-    target.fgYellow
-
-template onDemand*(target: string, def: BuildDef, build) =
+template onDemand(target: string, def: BuildDef, build) =
   block demand:
     let friendlyname = getFriendlyName(target, def)
-    if verb >= 2:
-      echo "checking ".fgMagenta, friendlyname
+    echo_Checking(friendlyname)
     for f in def.depfiles:
       if (not fileExists f) and (not checkfake(f)):
-        stderr.writeline "error".fgRed & " Recipe for " & friendlyname & " failed, file '" & f & "' is not exists"
+        echo_NotExists(friendlyname, f)
         return Failed
     if not def.isfake and target.fileExists:
-      if verb >= 2:
-        echo "exist ".fgGreen, friendlyname
+      echo_Checked("exist", friendlyname)
       if def.islazy:
-        if verb >= 3:
-          echo "skipped modification time check due to lazy = true".fgMagenta
+        echo_SkippedLazy("skipped modification time check due to lazy = true")
         break demand
       let targetTime = target.getLastModificationTime
       let depsTime = def.genLatest
-      if verb >= 3:
-        echo "time ".fgCyan, "target: ", ($targetTime).fgCyan, " depsTime: ", ($depsTime).fgCyan
+      echo_TimeReport(targetTime, depsTime)
       if targetTime >= depsTime:
-        if verb >= 1:
-          echo "skipped ".fgYellow, friendlyname
+        echo_SkippedTarget(friendlyname)
         break demand
-      if verb >= 2:
-        echo "outdated ".fgRed, friendlyname
+      echo_OutdatedTarget(friendlyname)
     build
-
-proc colorizeTarget*(name: string): string =
-  if name in alltargets: name.fgYellow
-  elif name in alttargets: "$1 <- $2".format(name.fgCyan.bold, alttargets[name].fgYellow)
-  elif fileExists name: name.fgBlue
-  else: name.fgRed
 
 proc genLatest(build: BuildDef): Time =
   result = getAppFilename().getLastModificationTime
   if build.isfake: return
   if build.mainfile != "":
     result = build.mainfile.getLastModificationTime
-    if verb >= 4:
-      echo "time ".fgBlue, "main ".bold, build.mainfile.fgYellow, " ", ($result).fgCyan
+    echo_TimeOfMainFile(build.mainfile, result)
   for f in build.depfiles:
     if checkfake f:
-      if verb >= 4:
-        echo "time ".fgBlue, f.fgYellow, " ", "skipped".fgRed
+      echo_TimeSkipped(f)
       continue
     let temp = f.getLastModificationTime
-    if verb >= 4:
-      echo "time ".fgBlue, f.fgYellow, " ", ($temp).fgCyan
+    echo_TimeOfFile(f, temp)
     if temp > result:
       result = temp
 
@@ -85,7 +64,7 @@ iterator reorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string, def
         yield (target, tp.def)
         queue.add target
     if queue.len == 0:
-      stderr.writeLine "Cannot resolve dependences: " & toSeq(tab.keys()).join(", ")
+      echo_CannotResolve("build", toSeq(tab.keys()).join(", "))
       break
     for item in queue:
       tab.del item
@@ -105,7 +84,7 @@ iterator cleanReorder(subtargets: TableRef[string, BuildDef]): tuple[tgt: string
         yield (target, tp.def)
         queue.add target
     if queue.len == 0:
-      stderr.writeLine "Cannot resolve dependences for clean: " & toSeq(tab.keys()).join(", ")
+      echo_CannotResolve("clean", toSeq(tab.keys()).join(", "))
       break
     for item in queue:
       tab.del item
@@ -117,7 +96,7 @@ proc findDependencies(tab: var TableRef[string, BuildDef], target: string, ismai
 
 proc grabDependencies(tab: var TableRef[string, BuildDef], name: string, forClean: static bool): BuildResult =
   if not (name in alltargets):
-    stderr.writeLine "No receipt for " & name.fgRed.bold
+    echo_NoRecipt(name)
     return Failed
   let base = alltargets[name]
   tab[name] = base
@@ -130,12 +109,8 @@ proc findDependencies(tab: var TableRef[string, BuildDef], target: string, ismai
   if target in tab: return Success
   elif target in alltargets:
     let def = alltargets[target]
-    if verb >= 2:
-      let friendlyname = getFriendlyName(target, def)
-      if ismain:
-        echo "found ".fgGreen, "main ".bold, friendlyname
-      else:
-        echo "found ".fgGreen, friendlyname
+    let friendlyname = getFriendlyName(target, def)
+    echo_Found(ismain, friendlyname)
     return grabDependencies(tab, target, forClean)
   elif not rec and target in alttargets:
     return findDependencies(tab, alttargets[target], ismain, forClean, true)
@@ -150,23 +125,20 @@ proc buildList(selected: openarray[string]): BuildResult =
     let friendlyname = getFriendlyName(target, def)
     onDemand(target, def):
       if verb >= 1:
-        echo "building ".fgLightGreen.bold, friendlyname
+        echo_Building(friendlyname)
       if def.action() != Success:
         return Failed
-  if verb >= 1:
-    echo "all done".fgLightGreen.bold
+  echo_AllDone()
   return Success
 
 proc buildAll(): BuildResult =
   for target, def in reorder(alltargets):
     let friendlyname = getFriendlyName(target, def)
     onDemand(target, def):
-      if verb >= 1:
-        echo "building ".fgLightGreen.bold, friendlyname
+      echo_Building(friendlyname)
       if def.action() != Success:
         return Failed
-  if verb >= 1:
-    echo "all done".fgLightGreen.bold
+  echo_AllDone()
   Success
 
 proc cleanList(selected: seq[string]): BuildResult =
@@ -175,8 +147,7 @@ proc cleanList(selected: seq[string]): BuildResult =
     propagate grabDependencies(tmpTargets, tgt, true)
   for target, def in cleanReorder(tmpTargets):
     let friendlyname = getFriendlyName(target, def)
-    if verb >= 1:
-      echo "clean ".fgRed.bold, friendlyname
+    echo_Cleaning(friendlyname)
     if def.cleans != nil:
       def.cleans()
   return Success
@@ -184,8 +155,7 @@ proc cleanList(selected: seq[string]): BuildResult =
 proc cleanAll(): BuildResult =
   for target, def in cleanReorder(alltargets):
     let friendlyname = getFriendlyName(target, def)
-    if verb >= 1:
-      echo "clean ".fgRed.bold, friendlyname
+    echo_Cleaning(friendlyname)
     if def.cleans != nil:
       def.cleans()
   return Success
@@ -194,8 +164,7 @@ proc fail2fatal(res: BuildResult) =
   if res == Failed:
     quit 1
 
-proc build*(verbosity: int = 0, targets: seq[string]) =
-  verb = verbosity
+proc build*(targets: seq[string]) =
   fail2fatal if targets.len == 0:
     if defaultTarget == "":
       buildAll()
@@ -204,8 +173,7 @@ proc build*(verbosity: int = 0, targets: seq[string]) =
   else:
     buildList(targets)
 
-proc clean*(verbosity: int = 0, targets: seq[string]) =
-  verb = verbosity
+proc clean*(targets: seq[string]) =
   fail2fatal if targets.len == 0:
     cleanAll()
   else:
@@ -213,12 +181,12 @@ proc clean*(verbosity: int = 0, targets: seq[string]) =
 
 proc dump*() =
   for key, tgt in reorder(alltargets):
-    echo "[", key.fgGreen.bold, "]"
+    echo_DumpTitle(key)
     if tgt.taskname != "":
-      echo "  name: ", tgt.taskname.fgMagenta.bold
+      echo_DumpName(tgt.taskname)
     if tgt.mainfile != "":
-      echo "  main: ", tgt.mainfile.colorizeTarget
+      echo_DumpMain(tgt.mainfile.colorizeTarget)
     if tgt.depfiles.len > 0:
-      echo "  deps:"
+      echo_DumpDeps()
       for dep in tgt.depfiles:
-        echo "    - ", dep.colorizeTarget
+        echo_DumpDepFile(dep.colorizeTarget)

@@ -1,4 +1,5 @@
-import sets, tables
+import sets, tables, strutils, terminal
+import defines
 
 type
   BuildDef* = object
@@ -15,5 +16,7 @@ type
 
 var alltargets* = newTable[string, BuildDef] 16
 var alttargets* = newTable[string, string] 16
-var verb* = 0
 var defaultTarget* = ""
+define("verbosity", verb, parseInt)
+var usecolor* = isatty stdout
+define("colors", usecolor, parseBool)
