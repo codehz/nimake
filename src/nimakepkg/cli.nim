@@ -55,8 +55,8 @@ proc handleCLI*() =
         parseDefine p.val
       of "verbosity", "v":
         parseDefine "verbosity=" & p.val
-      of "color":
-        parseDefine "color=" & p.val
+      of "colors":
+        parseDefine "colors=" & p.val
       else:
         quit "Unknown option: " & p.key
     of cmdArgument:
